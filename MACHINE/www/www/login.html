@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sign in</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <aside class="rail">
+    <div class="rail__mark">the<span>vault</span></div>
+    <p class="rail__quote">Every session starts with <b>proof of who you are</b> — nothing more, nothing less.</p>
+  </aside>
+
+  <main class="stage">
+    <div class="ticket">
+      <div class="ticket__perf"></div>
+      <p class="ticket__eyebrow">Access ticket · 01</p>
+      <h1>Sign in</h1>
+
+      <div id="msg" class="msg"></div>
+
+      <form id="loginForm" novalidate>
+        <div class="field">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" autocomplete="username" required />
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required />
+        </div>
+
+        <label class="check">
+          <input type="checkbox" id="totpToggle" />
+          <span>I have an authenticator code</span>
+        </label>
+
+        <div class="field field--totp" id="totpField">
+          <label for="totp">6-digit code</label>
+          <input type="text" id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" />
+        </div>
+
+        <button type="submit" class="submit" id="submitBtn">Sign in</button>
+      </form>
+
+      <p class="switch">No account yet? <a href="register.html">Register here</a></p>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+  <script>
+    const form = document.getElementById("loginForm");
+    const msg = document.getElementById("msg");
+    const submitBtn = document.getElementById("submitBtn");
+    const totpToggle = document.getElementById("totpToggle");
+    const totpField = document.getElementById("totpField");
+    const totpInput = document.getElementById("totp");
+
+    totpToggle.addEventListener("change", () => {
+      totpField.classList.toggle("is-open", totpToggle.checked);
+      if (totpToggle.checked) totpInput.focus();
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideMsg(msg);
+
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      const totp = totpToggle.checked ? totpInput.value.trim() : "";
+
+      if (!username || !password) {
+        showMsg(msg, "Username and password are required.", "bad");
+        return;
+      }
+
+      setBusy(submitBtn, true, "Signing in…", "Sign in");
+
+      try {
+        const result = await postForm(CONFIG.LOGIN_URL, { username, password, totp });
+        const parsed = parseApiResponse(result);
+
+        if (parsed.requiresTotp && !totpToggle.checked) {
+          totpToggle.checked = true;
+          totpField.classList.add("is-open");
+          totpInput.focus();
+          showMsg(msg, "This account has 2FA enabled — enter your authenticator code.", "bad");
+          return;
+        }
+
+        if (!parsed.success) {
+          showMsg(msg, parsed.message || "Sign in failed. Check your credentials and try again.", "bad");
+          return;
+        }
+
+        showMsg(msg, "Signed in — redirecting…", "good");
+        setTimeout(() => {
+          window.location.href = CONFIG.AFTER_LOGIN_URL;
+        }, 500);
+      } catch (err) {
+        showMsg(msg, "Couldn't reach the server. Please try again.", "bad");
+      } finally {
+        setBusy(submitBtn, false, "Signing in…", "Sign in");
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Manage users</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="dash">
+    <div class="dash__topbar">
+      <div class="rail__mark">the<span>vault</span></div>
+      <a href="dashboard.html" class="users__back">&larr; Back to dashboard</a>
+    </div>
+
+    <div class="users">
+      <div class="users__head">
+        <h2>Manage users</h2>
+        <p id="userCount" style="font-family: var(--mono); font-size: 11px; color: var(--muted);"></p>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 34%;">Username</th>
+            <th>Creator</th>
+            <th>Admin</th>
+            <th style="width: 90px;"></th>
+            <th style="width: 70px;"></th>
+          </tr>
+        </thead>
+        <tbody id="userRows">
+          <tr><td colspan="4" style="text-align:center; color: var(--muted); font-family: var(--mono); font-size: 12px;">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const userRows = document.getElementById("userRows");
+    const userCount = document.getElementById("userCount");
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+
+    function userRowHtml(user) {
+      const uname = escapeHtml(user.username);
+      return `
+        <tr data-username="${uname}" data-is-creator="${user.isCreator ? "1" : "0"}" data-is-admin="${user.isAdmin ? "1" : "0"}">
+          <td>
+            <input type="text" class="f-newUsername" value="${uname}" />
+          </td>
+          <td><input type="checkbox" class="f-isCreator" ${user.isCreator ? "checked" : ""} /></td>
+          <td><input type="checkbox" class="f-isAdmin" ${user.isAdmin ? "checked" : ""} /></td>
+          <td>
+            <button class="users__save">Save</button>
+            <div class="users__status"></div>
+          </td>
+          <td>
+            <button class="users__delete">Delete</button>
+          </td>
+        </tr>`;
+    }
+
+    async function loadUsers() {
+      try {
+        const result = await getJson(CONFIG.MANAGE_USERS_URL);
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          userRows.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#e08379; font-family: var(--mono); font-size: 12px;">Couldn't load users (not authorized, or session expired).</td></tr>`;
+          return;
+        }
+
+        const users = d.users || [];
+        userCount.textContent = `${users.length} user${users.length === 1 ? "" : "s"}`;
+
+        if (users.length === 0) {
+          userRows.innerHTML = `<tr><td colspan="4" style="text-align:center; color: var(--muted); font-family: var(--mono); font-size: 12px;">No users found.</td></tr>`;
+          return;
+        }
+
+        userRows.innerHTML = users.map(userRowHtml).join("");
+        userRows.querySelectorAll("tr[data-username]").forEach(wireRow);
+      } catch (err) {
+        userRows.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#e08379; font-family: var(--mono); font-size: 12px;">Couldn't reach the server.</td></tr>`;
+      }
+    }
+
+    function wireRow(row) {
+      const saveBtn = row.querySelector(".users__save");
+      const deleteBtn = row.querySelector(".users__delete");
+      const statusEl = row.querySelector(".users__status");
+      const newUsernameInput = row.querySelector(".f-newUsername");
+      const isCreatorInput = row.querySelector(".f-isCreator");
+      const isAdminInput = row.querySelector(".f-isAdmin");
+
+      deleteBtn.addEventListener("click", async () => {
+        const currentUsername = row.dataset.username;
+        if (!confirm(`Delete user "${currentUsername}"? This can't be undone.`)) return;
+
+        deleteBtn.disabled = true;
+        saveBtn.disabled = true;
+        deleteBtn.textContent = "Deleting…";
+
+        try {
+          const result = await deleteJson(CONFIG.MANAGE_USERS_URL, { username: currentUsername });
+          const d = result.data || {};
+
+          if (d.code !== "ok") {
+            statusEl.textContent = d.message || d.error || "Failed to delete.";
+            statusEl.className = "users__status is-bad";
+            deleteBtn.disabled = false;
+            saveBtn.disabled = false;
+            deleteBtn.textContent = "Delete";
+            return;
+          }
+
+          row.remove();
+          const remaining = userRows.querySelectorAll("tr[data-username]").length;
+          userCount.textContent = `${remaining} user${remaining === 1 ? "" : "s"}`;
+        } catch (err) {
+          statusEl.textContent = "Couldn't reach the server.";
+          statusEl.className = "users__status is-bad";
+          deleteBtn.disabled = false;
+          saveBtn.disabled = false;
+          deleteBtn.textContent = "Delete";
+        }
+      });
+
+      saveBtn.addEventListener("click", async () => {
+        const originalUsername = row.dataset.username;
+        const changes = [];
+
+        const newUsername = newUsernameInput.value.trim();
+        if (newUsername && newUsername !== originalUsername) {
+          changes.push({ newUsername });
+        }
+
+        const originalIsCreator = row.dataset.isCreator === "1";
+        const originalIsAdmin = row.dataset.isAdmin === "1";
+        if (isCreatorInput.checked !== originalIsCreator) {
+          changes.push({ isCreator: isCreatorInput.checked });
+        }
+        if (isAdminInput.checked !== originalIsAdmin) {
+          changes.push({ isAdmin: isAdminInput.checked });
+        }
+
+        if (changes.length === 0) {
+          statusEl.textContent = "Nothing changed.";
+          statusEl.className = "users__status";
+          return;
+        }
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving…";
+        statusEl.textContent = "";
+        statusEl.className = "users__status";
+
+        // One PUT per changed field, sent in order, each keyed off
+        // whatever username is currently on record for this row (a
+        // rename in an earlier step must be reflected before the
+        // next request, since the API looks users up by username).
+        let currentUsername = originalUsername;
+        const failures = [];
+
+        for (const change of changes) {
+          try {
+            const result = await putJson(CONFIG.MANAGE_USERS_URL, {
+              username: currentUsername,
+              ...change,
+            });
+            const d = result.data || {};
+
+            if (d.code !== "ok") {
+              failures.push(Object.keys(change)[0] + ": " + (d.message || d.error || "failed"));
+              continue;
+            }
+
+            if (change.newUsername) currentUsername = change.newUsername;
+            if (change.isCreator !== undefined) row.dataset.isCreator = change.isCreator ? "1" : "0";
+            if (change.isAdmin !== undefined) row.dataset.isAdmin = change.isAdmin ? "1" : "0";
+          } catch (err) {
+            failures.push(Object.keys(change)[0] + ": couldn't reach the server");
+          }
+        }
+
+        row.dataset.username = currentUsername;
+        newUsernameInput.value = currentUsername;
+
+        if (failures.length === 0) {
+          statusEl.textContent = "Saved.";
+          statusEl.className = "users__status is-good";
+        } else {
+          statusEl.textContent = failures.join(" · ");
+          statusEl.className = "users__status is-bad";
+        }
+
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save";
+      });
+    }
+
+    async function guardAdminAccess() {
+      try {
+        const result = await getJson(CONFIG.CHECK_SESSION_URL);
+        const d = result.data || {};
+        if (!d.loggedIn) {
+          window.location.href = "login.html";
+          return;
+        }
+        if (!d.isAdmin) {
+          window.location.href = "dashboard.html";
+          return;
+        }
+        loadUsers();
+      } catch (err) {
+        window.location.href = "login.html";
+      }
+    }
+
+    guardAdminAccess();
+  </script>
+</body>
+</html>

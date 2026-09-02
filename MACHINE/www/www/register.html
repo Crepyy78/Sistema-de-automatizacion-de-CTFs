@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Create account</title>
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+
+  <aside class="rail">
+    <div class="rail__mark">the<span>vault</span></div>
+    <p class="rail__quote">Register once. <b>Keep the stub</b> — if you enable an authenticator, it's your only copy of the secret.</p>
+  </aside>
+
+  <main class="stage">
+    <div class="ticket">
+      <div class="ticket__perf"></div>
+
+      <!-- ---------- step 1: registration form ---------- -->
+      <div id="formStep">
+        <p class="ticket__eyebrow">New ticket · 01</p>
+        <h1>Create account</h1>
+
+        <div id="msg" class="msg"></div>
+
+        <form id="registerForm" novalidate>
+          <div class="field">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" autocomplete="username" required />
+          </div>
+
+          <div class="field">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" autocomplete="new-password" required />
+          </div>
+
+          <div class="field">
+            <label for="confirm">Confirm password</label>
+            <input type="password" id="confirm" name="confirm" autocomplete="new-password" required />
+          </div>
+
+          <label class="check">
+            <input type="checkbox" id="totpEnable" />
+            <span>Enable two-factor authentication (authenticator app)</span>
+          </label>
+
+          <button type="submit" class="submit" id="submitBtn">Create account</button>
+        </form>
+
+        <p class="switch">Already have an account? <a href="login.html">Sign in</a></p>
+      </div>
+
+      <!-- ---------- step 2: TOTP enrollment ---------- -->
+      <div id="enrollStep" class="enroll">
+        <p class="ticket__eyebrow">New ticket · 02</p>
+        <h1>Set up your authenticator</h1>
+
+        <p class="enroll__label">Scan with FreeOTP, Google Authenticator, 1Password, Authy, etc.</p>
+        <div class="enroll__qr" id="qrHolder"></div>
+
+        <p class="enroll__label">Or enter this key manually</p>
+        <div class="enroll__secret">
+          <code id="secretText">—</code>
+          <button type="button" class="enroll__copy" id="copyBtn">Copy</button>
+        </div>
+
+        <button type="button" class="submit" id="continueBtn">I've saved it — continue to sign in</button>
+      </div>
+
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+  <script>
+    const form = document.getElementById("registerForm");
+    const msg = document.getElementById("msg");
+    const submitBtn = document.getElementById("submitBtn");
+
+    const formStep = document.getElementById("formStep");
+    const enrollStep = document.getElementById("enrollStep");
+    const qrHolder = document.getElementById("qrHolder");
+    const secretText = document.getElementById("secretText");
+    const copyBtn = document.getElementById("copyBtn");
+    const continueBtn = document.getElementById("continueBtn");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideMsg(msg);
+
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      const confirm = document.getElementById("confirm").value;
+      const totpEnabled = document.getElementById("totpEnable").checked;
+
+      if (!username || !password) {
+        showMsg(msg, "Username and password are required.", "bad");
+        return;
+      }
+      if (password !== confirm) {
+        showMsg(msg, "Passwords don't match.", "bad");
+        return;
+      }
+
+      setBusy(submitBtn, true, "Creating account…", "Create account");
+
+      try {
+        const result = await postForm(CONFIG.REGISTER_URL, {
+          username,
+          password,
+          totp: totpEnabled ? "y" : "",
+        });
+        const parsed = parseApiResponse(result);
+
+        if (!parsed.success) {
+          showMsg(msg, parsed.message || "Registration failed. Please try again.", "bad");
+          return;
+        }
+
+        if (totpEnabled && parsed.otpauth) {
+          showEnrollment(parsed.otpauth, parsed.secret);
+        } else {
+          showMsg(msg, "Account created — redirecting to sign in…", "good");
+          setTimeout(() => (window.location.href = "login.html"), 700);
+        }
+      } catch (err) {
+        showMsg(msg, "Couldn't reach the server. Please try again.", "bad");
+      } finally {
+        setBusy(submitBtn, false, "Creating account…", "Create account");
+      }
+    });
+
+    function showEnrollment(otpauthUri, secret) {
+      formStep.style.display = "none";
+      enrollStep.classList.add("is-visible");
+
+      qrHolder.innerHTML = "";
+      if (window.QRCode) {
+        new QRCode(qrHolder, {
+          text: otpauthUri,
+          width: 260,
+          height: 260,
+          colorDark: "#10131a",
+          colorLight: "#eae6da",
+        });
+      } else {
+        // Fallback if the QR library failed to load: show the raw URI.
+        const p = document.createElement("p");
+        p.style.fontFamily = "var(--mono)";
+        p.style.fontSize = "12px";
+        p.style.color = "#10131a";
+        p.style.wordBreak = "break-all";
+        p.textContent = otpauthUri;
+        qrHolder.appendChild(p);
+      }
+
+      secretText.textContent = secret || "(secret not found in response — check the otpauth:// URI above)";
+    }
+
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(secretText.textContent);
+        copyBtn.textContent = "Copied";
+        setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+      } catch (_) {
+        /* clipboard API unavailable — ignore silently */
+      }
+    });
+
+    continueBtn.addEventListener("click", () => {
+      window.location.href = "login.html";
+    });
+  </script>
+</body>
+</html>

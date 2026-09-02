@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Event</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="dash">
+    <div class="dash__topbar">
+      <div class="rail__mark">the<span>vault</span></div>
+      <a href="dashboard.html" class="users__back">&larr; Back to dashboard</a>
+    </div>
+
+    <main class="stage" style="padding-top: 24px; align-items: flex-start;">
+      <div class="ticket ticket--wide">
+        <div class="ticket__perf"></div>
+
+        <p class="ticket__eyebrow" id="eyebrow">Event</p>
+        <h1 id="eventName">—</h1>
+
+        <div id="msg" class="msg"></div>
+
+        <dl class="teams__kv" id="eventMeta"></dl>
+
+        <div class="teams__invite" id="mantainerInvite" style="display:none; border-top: none; padding-top: 0;">
+          <button type="button" class="teams__mini-btn" id="inviteMantainerBtn">Invite a mantainer</button>
+          <div class="msg" id="inviteMantainerMsg" style="margin-top: 10px; margin-bottom: 0;"></div>
+        </div>
+
+        <div class="teams__invite" id="joinEventSection" style="display:none; border-top: none; padding-top: 0;">
+          <div class="field" style="margin-bottom: 10px;">
+            <label for="joinTeamName">Team name (leave blank to join solo)</label>
+            <input type="text" id="joinTeamName" />
+          </div>
+          <button type="button" class="teams__mini-btn" id="joinEventBtn">Join event</button>
+          <div class="msg" id="joinEventMsg" style="margin-top: 10px; margin-bottom: 0;"></div>
+        </div>
+
+        <div class="event__section">
+          <div class="type-tabs" id="eventTabs">
+            <label class="type-tab is-active" data-tab="challenges">
+              <input type="radio" name="eventTab" value="challenges" checked /> Challenges
+            </label>
+            <label class="type-tab" data-tab="ranking">
+              <input type="radio" name="eventTab" value="ranking" /> Ranking
+            </label>
+          </div>
+
+          <div class="type-panel is-active" id="panelChallenges">
+            <p class="event__section-sub" id="chalCount">Loading challenges…</p>
+
+            <button type="button" class="teams__mini-btn" id="openAddChallengeBtn" style="display:none; margin-bottom: 12px;">+ Add challenge</button>
+            <div id="addChallengeMsg" class="msg" style="margin-bottom: 12px;"></div>
+
+            <div class="chal-grid" id="chalGrid"></div>
+          </div>
+
+          <div class="type-panel" id="panelRanking">
+            <p class="event__section-sub" id="rankingSub">Loading ranking…</p>
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th style="width: 15%;">#</th>
+                  <th>Team</th>
+                  <th style="width: 25%; text-align: right;">Points</th>
+                </tr>
+              </thead>
+              <tbody id="rankingRows">
+                <tr><td colspan="3" style="text-align:center; color: var(--muted); font-family: var(--mono); font-size: 12px;">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="addChallengeModal" style="display:none;">
+    <div class="modal">
+      <div class="modal__head">
+        <h3>Add challenges</h3>
+        <button type="button" class="modal__close" id="closeAddChallengeModal">&times;</button>
+      </div>
+      <p class="event__section-sub" id="modalChalCount">Loading challenges…</p>
+      <div class="chal-grid" id="modalChalGrid"></div>
+      <div class="modal__actions">
+        <button type="button" class="submit" id="confirmAddChallengesBtn">Add selected</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const eyebrow = document.getElementById("eyebrow");
+    const eventNameEl = document.getElementById("eventName");
+    const eventMeta = document.getElementById("eventMeta");
+    const msg = document.getElementById("msg");
+    const chalGrid = document.getElementById("chalGrid");
+    const chalCount = document.getElementById("chalCount");
+    const openAddChallengeBtn = document.getElementById("openAddChallengeBtn");
+    const addChallengeMsg = document.getElementById("addChallengeMsg");
+    const addChallengeModal = document.getElementById("addChallengeModal");
+    const closeAddChallengeModal = document.getElementById("closeAddChallengeModal");
+    const modalChalGrid = document.getElementById("modalChalGrid");
+    const modalChalCount = document.getElementById("modalChalCount");
+    const confirmAddChallengesBtn = document.getElementById("confirmAddChallengesBtn");
+    const mantainerInvite = document.getElementById("mantainerInvite");
+    const inviteMantainerBtn = document.getElementById("inviteMantainerBtn");
+    const inviteMantainerMsg = document.getElementById("inviteMantainerMsg");
+    const joinEventSection = document.getElementById("joinEventSection");
+    const joinTeamName = document.getElementById("joinTeamName");
+    const joinEventBtn = document.getElementById("joinEventBtn");
+    const joinEventMsg = document.getElementById("joinEventMsg");
+    const eventTabs = document.getElementById("eventTabs");
+    const panelChallenges = document.getElementById("panelChallenges");
+    const panelRanking = document.getElementById("panelRanking");
+    const rankingRows = document.getElementById("rankingRows");
+    const rankingSub = document.getElementById("rankingSub");
+
+    const RANKING_POLL_MS = 20000;
+    let rankingInterval = null;
+    let activeTab = "challenges";
+
+    let catalogChallenges = [];
+    let modalExpandedNames = new Set();
+    let selectedToAdd = new Set();
+
+    const params = new URLSearchParams(window.location.search);
+    const eventName = params.get("name") || "";
+    const isPublic = params.get("isPublic") === "1";
+    const isMantainer = params.get("isMantainer") === "1";
+    const canEditChallenges = !isPublic && isMantainer;
+
+    let expandedNames = new Set();
+    let editingNames = new Set();
+    let allChallenges = [];
+    let activeContainer = null; // { instanceId, challengeName, port, status } — resets on page reload
+    let solvedNames = new Set(); // repopulated from the server on every loadChallenges() call
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+
+    function truncate(str, n) {
+      const s = String(str ?? "");
+      return s.length > n ? s.slice(0, n) + "…" : s;
+    }
+
+    function formatDate(value) {
+      if (!value) return "";
+      const d = new Date(value.replace(" ", "T") + "Z"); // stored value is UTC
+      if (isNaN(d)) return value;
+      return d.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+
+    // ---------- session gate ----------
+    (async () => {
+      try {
+        const result = await getJson(CONFIG.CHECK_SESSION_URL);
+        const d = result.data || {};
+        if (!d.loggedIn) { window.location.href = "login.html"; return; }
+      } catch (err) {
+        window.location.href = "login.html";
+        return;
+      }
+
+      if (!eventName) {
+        window.location.href = "dashboard.html";
+        return;
+      }
+
+      eventNameEl.textContent = eventName;
+      eyebrow.textContent = isPublic ? "Event" : "Event · Unpublished";
+
+      if (canEditChallenges) {
+        openAddChallengeBtn.style.display = "inline-block";
+      }
+
+      if (isMantainer) {
+        mantainerInvite.style.display = "block";
+      } else if (isPublic) {
+        joinEventSection.style.display = "block";
+      }
+
+      renderMeta({
+        startDate: params.get("startDate") || "",
+        endDate: params.get("endDate") || "",
+      });
+
+      await loadActiveContainer();
+      loadEventDetails();
+      loadChallenges();
+    })();
+
+    // ---------- restore running container across page reloads ----------
+    async function loadActiveContainer() {
+      try {
+        const result = await getJson(CONFIG.MANAGE_STATUS_CHALLENGE_URL);
+        const d = result.data || {};
+        if (d.code === "ok" && d.container && d.container.eventName === eventName) {
+          activeContainer = {
+            instanceId: d.container.instanceId,
+            challengeName: d.container.name,
+            port: d.container.port,
+            status: d.container.status,
+          };
+        }
+      } catch (err) {
+        // container state just won't be restored — start/stop still work from here on
+      }
+    }
+
+    // ---------- tabs ----------
+    eventTabs.querySelectorAll(".type-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        activeTab = tab.dataset.tab;
+
+        eventTabs.querySelectorAll(".type-tab").forEach((t) => t.classList.toggle("is-active", t === tab));
+        panelChallenges.classList.toggle("is-active", activeTab === "challenges");
+        panelRanking.classList.toggle("is-active", activeTab === "ranking");
+
+        if (activeTab === "ranking") {
+          loadRanking();
+          if (!rankingInterval) rankingInterval = setInterval(loadRanking, RANKING_POLL_MS);
+        }
+      });
+    });
+
+    // ---------- ranking ----------
+    async function loadRanking() {
+      try {
+        const result = await getJson(`${CONFIG.GET_RANKING_URL}?${new URLSearchParams({ eventName })}`);
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          rankingSub.textContent = d.message || "Couldn't load ranking.";
+          rankingSub.style.display = "block";
+          return;
+        }
+
+        renderRanking(d.ranking || []);
+      } catch (err) {
+        rankingSub.textContent = "Couldn't reach the server.";
+        rankingSub.style.display = "block";
+      }
+    }
+
+    function renderRanking(ranking) {
+      if (ranking.length === 0) {
+        rankingSub.textContent = "No teams have entered this event yet.";
+        rankingSub.style.display = "block";
+        rankingRows.innerHTML = "";
+        return;
+      }
+
+      rankingSub.style.display = "none";
+      rankingRows.innerHTML = ranking
+        .map(
+          (row) => `
+        <tr>
+          <td class="ranking-table__rank">#${escapeHtml(row.rank)}</td>
+          <td>${escapeHtml(row.teamName)}</td>
+          <td class="ranking-table__points">${escapeHtml(row.points)}</td>
+        </tr>`
+        )
+        .join("");
+    }
+
+    function renderMeta({ startDate, endDate, description, points }) {
+      const rows = [
+        ["Starts", formatDate(startDate)],
+        ["Ends", formatDate(endDate)],
+      ];
+      if (description) rows.push(["Description", description]);
+      if (points !== undefined && points !== null && points !== "") rows.push(["Your points", String(points)]);
+
+      eventMeta.innerHTML = rows
+        .map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`)
+        .join("");
+    }
+
+    // ---------- extra details (description / points), when available ----------
+    async function loadEventDetails() {
+      try {
+        const result = await getJson(CONFIG.ADMINISTRATE_CTF_URL);
+        const list = Array.isArray(result.data) ? result.data : [];
+        const match = list.find((ev) => ev.name === eventName);
+        if (!match) return;
+
+        renderMeta({
+          startDate: params.get("startDate") || match.startDate || "",
+          endDate: params.get("endDate") || match.endDate || "",
+          description: match.description,
+          points: match.points,
+        });
+      } catch (err) {
+        // Description/points just stay hidden if this can't be reached.
+      }
+    }
+
+    // ---------- challenges ----------
+    async function loadChallenges() {
+      try {
+        const result = await getJson(`${CONFIG.CREATE_EVENT_URL}?${new URLSearchParams({ eventName })}`);
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          chalCount.textContent = d.message || "Couldn't load challenges.";
+          return;
+        }
+
+        allChallenges = d.challenges || [];
+        solvedNames = new Set(allChallenges.filter((c) => c.solved).map((c) => c.name));
+        renderChallengeGrid();
+      } catch (err) {
+        chalCount.textContent = "Couldn't reach the server.";
+      }
+    }
+
+    function challengeCardHtml(c) {
+      const name = c.name ?? "";
+      const isExpanded = expandedNames.has(name);
+      const isEditing = editingNames.has(name);
+
+      if (isEditing) {
+        const field = (key, label, type = "text") => `
+          <div class="chal-card__edit-field">
+            <label>${escapeHtml(label)}</label>
+            <input type="${type}" class="edit-${key}" value="${escapeHtml(c[key] ?? "")}" />
+          </div>`;
+
+        return `
+          <div class="chal-card chal-card--editing" data-name="${escapeHtml(name)}">
+            ${field("name", "Name")}
+            ${field("category", "Category")}
+            ${field("description", "Description")}
+            ${field("points", "Points", "number")}
+            ${field("difficulty", "Difficulty")}
+            ${field("author", "Author")}
+            <div class="chal-card__edit-actions">
+              <button type="button" class="teams__mini-btn" data-action="save-challenge">Save</button>
+              <button type="button" class="teams__mini-btn" data-action="cancel-edit">Cancel</button>
+            </div>
+          </div>`;
+      }
+
+      return `
+        <div class="chal-card" data-name="${escapeHtml(name)}">
+          <div class="chal-card__top">
+            <span class="chal-card__name">${escapeHtml(name)}</span>
+            <span class="chal-card__top-right">
+              ${solvedNames.has(name) ? `<span class="chal-card__solved-badge">✓ Solved</span>` : ""}
+              <span class="chal-card__category">${escapeHtml(c.category ?? "")}</span>
+              ${
+                canEditChallenges
+                  ? `<button type="button" class="teams__mini-btn" data-action="edit-challenge">Edit</button>
+                     <button type="button" class="teams__mini-btn teams__mini-btn--danger" data-action="delete-challenge">Delete</button>`
+                  : ""
+              }
+            </span>
+          </div>
+          <div class="chal-card__desc">${escapeHtml(isExpanded ? (c.description ?? "") : truncate(c.description, 70))}</div>
+          ${
+            isExpanded
+              ? `<dl class="chal-card__meta">
+                  <dt>Points</dt><dd>${escapeHtml(c.points ?? "")}</dd>
+                  <dt>Difficulty</dt><dd>${escapeHtml(c.difficulty ?? "")}</dd>
+                  <dt>Author</dt><dd>${escapeHtml(c.author ?? "")}</dd>
+                </dl>`
+              : ""
+          }
+          ${containerBlockHtml(name)}
+        </div>`;
+    }
+
+    function containerBlockHtml(name) {
+      const container = activeContainer && activeContainer.challengeName === name ? activeContainer : null;
+      const otherActive = activeContainer && !container;
+
+      if (container) {
+        const solved = solvedNames.has(name);
+        return `
+          <div class="chal-card__container">
+            <span class="chal-card__container-status">${
+              container.status === "running"
+                ? `Running${container.port ? " on port " + escapeHtml(container.port) : ""}`
+                : "Paused"
+            }</span>
+            <div class="chal-card__container-actions">
+              ${
+                container.status === "running"
+                  ? `<button type="button" class="teams__mini-btn" data-action="stop-container">Stop</button>`
+                  : `<button type="button" class="teams__mini-btn" data-action="continue-container">Continue</button>`
+              }
+              <button type="button" class="teams__mini-btn teams__mini-btn--danger" data-action="delete-container">Delete</button>
+            </div>
+          </div>
+          ${
+            container.status === "running"
+              ? solved
+                ? `<div class="chal-card__solved">✓ Solved</div>`
+                : `<div class="chal-card__flag-form">
+                    <input type="text" class="flag-input" placeholder="Flag" />
+                    <button type="button" class="teams__mini-btn" data-action="submit-flag">Submit</button>
+                  </div>`
+              : ""
+          }`;
+      }
+
+      return `
+        <div class="chal-card__container">
+          <button type="button" class="teams__mini-btn" data-action="start-container" ${otherActive ? "disabled" : ""} title="${
+        otherActive ? "Stop or delete your current challenge first" : ""
+      }">Start</button>
+        </div>`;
+    }
+
+    function renderChallengeGrid() {
+      chalCount.textContent = `${allChallenges.length} challenge${allChallenges.length === 1 ? "" : "s"}`;
+
+      if (allChallenges.length === 0) {
+        chalGrid.innerHTML = `<div class="chal-empty">No challenges attached to this event yet.</div>`;
+        return;
+      }
+
+      chalGrid.innerHTML = allChallenges.map(challengeCardHtml).join("");
+
+      chalGrid.querySelectorAll(".chal-card").forEach((card) => {
+        if (card.classList.contains("chal-card--editing")) {
+          card.querySelector('[data-action="save-challenge"]').addEventListener("click", (e) => {
+            e.stopPropagation();
+            saveChallenge(card);
+          });
+          card.querySelector('[data-action="cancel-edit"]').addEventListener("click", (e) => {
+            e.stopPropagation();
+            editingNames.delete(card.dataset.name);
+            renderChallengeGrid();
+          });
+          return;
+        }
+
+        card.addEventListener("click", (e) => {
+          if (e.target.closest("button")) return;
+          if (window.getSelection().toString().length > 0) return; // don't collapse mid text-selection (e.g. copying the port)
+          const name = card.dataset.name;
+          if (expandedNames.has(name)) expandedNames.delete(name);
+          else expandedNames.add(name);
+          renderChallengeGrid();
+        });
+
+        const editBtn = card.querySelector('[data-action="edit-challenge"]');
+        if (editBtn) {
+          editBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            editingNames.add(card.dataset.name);
+            renderChallengeGrid();
+          });
+        }
+
+        const deleteBtn = card.querySelector('[data-action="delete-challenge"]');
+        if (deleteBtn) {
+          deleteBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            deleteChallenge(card.dataset.name, deleteBtn);
+          });
+        }
+
+        const startBtn = card.querySelector('[data-action="start-container"]');
+        if (startBtn) {
+          startBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const c = allChallenges.find((x) => x.name === card.dataset.name);
+            startContainer(card.dataset.name, c ? c.category : "", startBtn);
+          });
+        }
+
+        const stopBtn = card.querySelector('[data-action="stop-container"]');
+        if (stopBtn) {
+          stopBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            stopContainer(stopBtn);
+          });
+        }
+
+        const continueBtn = card.querySelector('[data-action="continue-container"]');
+        if (continueBtn) {
+          continueBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            continueContainer(continueBtn);
+          });
+        }
+
+        const deleteContainerBtn = card.querySelector('[data-action="delete-container"]');
+        if (deleteContainerBtn) {
+          deleteContainerBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            deleteContainer(deleteContainerBtn);
+          });
+        }
+
+        const submitFlagBtn = card.querySelector('[data-action="submit-flag"]');
+        if (submitFlagBtn) {
+          submitFlagBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            submitFlag(card.dataset.name, card, submitFlagBtn);
+          });
+          const flagInput = card.querySelector(".flag-input");
+          if (flagInput) {
+            flagInput.addEventListener("click", (e) => e.stopPropagation());
+            flagInput.addEventListener("keydown", (e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitFlag(card.dataset.name, card, submitFlagBtn);
+              }
+            });
+          }
+        }
+      });
+    }
+
+    async function submitFlag(name, card, btn) {
+      const flagInput = card.querySelector(".flag-input");
+      const flag = flagInput ? flagInput.value.trim() : "";
+
+      if (!flag) {
+        alert("Enter a flag.");
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "Checking…";
+
+      try {
+        const result = await postJson(CONFIG.SUBMIT_FLAG_URL, { eventName, name, flag });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          alert(d.message || "Incorrect flag.");
+          btn.disabled = false;
+          btn.textContent = "Submit";
+          return;
+        }
+
+        solvedNames.add(name);
+        alert(d.message || "Correct flag!");
+        renderChallengeGrid();
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        btn.disabled = false;
+        btn.textContent = "Submit";
+      }
+    }
+
+    // ---------- challenge container (start/stop/continue/delete) ----------
+    async function startContainer(name, category, btn) {
+      btn.disabled = true;
+      btn.textContent = "Starting…";
+
+      try {
+        const result = await postJson(CONFIG.MANAGE_STATUS_CHALLENGE_URL, { eventName, name });
+        const d = result.data || {};
+
+        if (String(category).toLowerCase() === "web") {
+          // manageStatusChallenge.php doesn't return a port/body for web challenges —
+          // treat any non-network-error response as started.
+          activeContainer = { instanceId: null, challengeName: name, port: null, status: "running" };
+          alert("Challenge started. Web challenges don't return a port here — check with the event organizer for the access URL. It also can't be stopped/deleted from here.");
+          renderChallengeGrid();
+          return;
+        }
+
+        if (d.code !== "ok") {
+          alert(d.message || "Failed to start the challenge.");
+          btn.disabled = false;
+          btn.textContent = "Start";
+          return;
+        }
+
+        const instanceMatch = /instance:\s*(\S+)/.exec(d.message || "");
+        const portMatch = /Port:\s*(\d+)/.exec(d.message || "");
+        activeContainer = {
+          instanceId: instanceMatch ? instanceMatch[1] : null,
+          challengeName: name,
+          port: portMatch ? portMatch[1] : null,
+          status: "running",
+        };
+        renderChallengeGrid();
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        btn.disabled = false;
+        btn.textContent = "Start";
+      }
+    }
+
+    async function stopContainer(btn) {
+      if (!activeContainer || !activeContainer.instanceId) return;
+      btn.disabled = true;
+      btn.textContent = "Stopping…";
+
+      try {
+        const result = await putJson(CONFIG.MANAGE_STATUS_CHALLENGE_URL, { option: "stop", instanceId: activeContainer.instanceId });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          alert(d.message || "Failed to stop the challenge.");
+          btn.disabled = false;
+          btn.textContent = "Stop";
+          return;
+        }
+
+        activeContainer.status = "pause";
+        renderChallengeGrid();
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        btn.disabled = false;
+        btn.textContent = "Stop";
+      }
+    }
+
+    async function continueContainer(btn) {
+      if (!activeContainer || !activeContainer.instanceId) return;
+      btn.disabled = true;
+      btn.textContent = "Resuming…";
+
+      try {
+        const result = await putJson(CONFIG.MANAGE_STATUS_CHALLENGE_URL, { option: "continue", instanceId: activeContainer.instanceId });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          alert(d.message || "Failed to resume the challenge.");
+          btn.disabled = false;
+          btn.textContent = "Continue";
+          return;
+        }
+
+        const portMatch = /Port:\s*(\d+)/.exec(d.message || "");
+        activeContainer.status = "running";
+        activeContainer.port = portMatch ? portMatch[1] : activeContainer.port;
+        renderChallengeGrid();
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        btn.disabled = false;
+        btn.textContent = "Continue";
+      }
+    }
+
+    async function deleteContainer(btn) {
+      if (!confirm("Delete this challenge instance? This can't be undone.")) return;
+      btn.disabled = true;
+      btn.textContent = "…";
+
+      try {
+        const result = await deleteJson(CONFIG.MANAGE_STATUS_CHALLENGE_URL, {});
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          alert(d.message || "Failed to delete the challenge instance.");
+          btn.disabled = false;
+          btn.textContent = "Delete";
+          return;
+        }
+
+        activeContainer = null;
+        renderChallengeGrid();
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        btn.disabled = false;
+        btn.textContent = "Delete";
+      }
+    }
+
+    // ---------- invite a mantainer ----------
+    inviteMantainerBtn.addEventListener("click", async () => {
+      hideMsg(inviteMantainerMsg);
+
+      inviteMantainerBtn.disabled = true;
+      inviteMantainerBtn.textContent = "Generating…";
+
+      try {
+        const result = await postJson(CONFIG.CREATE_EVENT_INVITE_URL, { eventName });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          showMsg(inviteMantainerMsg, d.message || "Failed to generate invite code.", "bad");
+        } else {
+          showMsg(inviteMantainerMsg, d.message, "good");
+        }
+      } catch (err) {
+        showMsg(inviteMantainerMsg, "Couldn't reach the server.", "bad");
+      } finally {
+        inviteMantainerBtn.disabled = false;
+        inviteMantainerBtn.textContent = "Invite a mantainer";
+      }
+    });
+
+    // ---------- join event ----------
+    joinEventBtn.addEventListener("click", async () => {
+      hideMsg(joinEventMsg);
+
+      joinEventBtn.disabled = true;
+      joinEventBtn.textContent = "Joining…";
+
+      try {
+        const payload = { eventName };
+        const teamName = joinTeamName.value.trim();
+        if (teamName) payload.teamName = teamName;
+
+        const result = await postJson(CONFIG.JOIN_EVENT_URL, payload);
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          showMsg(joinEventMsg, d.message || "Failed to join event.", "bad");
+        } else {
+          showMsg(joinEventMsg, d.message || "Joined.", "good");
+          loadChallenges();
+        }
+      } catch (err) {
+        showMsg(joinEventMsg, "Couldn't reach the server.", "bad");
+      } finally {
+        joinEventBtn.disabled = false;
+        joinEventBtn.textContent = "Join event";
+      }
+    });
+
+    async function deleteChallenge(name, btn) {
+      if (!confirm(`Remove "${name}" from this event?`)) return;
+
+      btn.disabled = true;
+      btn.textContent = "…";
+
+      try {
+        const result = await deleteJson(CONFIG.CREATE_EVENT_URL, { eventName, challengeName: name });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          alert(d.message || "Failed to remove challenge.");
+          btn.disabled = false;
+          btn.textContent = "Delete";
+          return;
+        }
+
+        expandedNames.delete(name);
+        editingNames.delete(name);
+        loadChallenges();
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        btn.disabled = false;
+        btn.textContent = "Delete";
+      }
+    }
+
+    // ---------- add-challenge modal ----------
+    async function openModal() {
+      addChallengeModal.style.display = "flex";
+      selectedToAdd.clear();
+      modalExpandedNames.clear();
+      confirmAddChallengesBtn.textContent = "Add selected";
+
+      if (catalogChallenges.length === 0) {
+        modalChalCount.textContent = "Loading challenges…";
+        try {
+          const result = await getJson(CONFIG.GET_CHALLENGES_FOR_CTF_URL);
+          const d = result.data || {};
+          if (d.code !== "ok") {
+            modalChalCount.textContent = d.message || "Couldn't load challenges.";
+            return;
+          }
+          catalogChallenges = d.challenges || [];
+        } catch (err) {
+          modalChalCount.textContent = "Couldn't reach the server.";
+          return;
+        }
+      }
+
+      renderModalGrid();
+    }
+
+    function closeModal() {
+      addChallengeModal.style.display = "none";
+    }
+
+    function renderModalGrid() {
+      const alreadyAdded = new Set(allChallenges.map((c) => c.name));
+      const available = catalogChallenges.filter((c) => !alreadyAdded.has(c.name));
+
+      modalChalCount.textContent = `${available.length} available`;
+
+      if (available.length === 0) {
+        modalChalGrid.innerHTML = `<div class="chal-empty">No more challenges to add.</div>`;
+        return;
+      }
+
+      modalChalGrid.classList.add("is-select-mode");
+      modalChalGrid.innerHTML = available
+        .map((c) => {
+          const name = c.name ?? "";
+          const isExpanded = modalExpandedNames.has(name);
+          const isSelected = selectedToAdd.has(name);
+
+          return `
+            <div class="chal-card ${isSelected ? "is-selected" : ""}" data-name="${escapeHtml(name)}">
+              <input type="checkbox" class="chal-card__check" data-name="${escapeHtml(name)}" ${isSelected ? "checked" : ""} />
+              <div class="chal-card__top">
+                <span class="chal-card__name">${escapeHtml(name)}</span>
+                <span class="chal-card__category">${escapeHtml(c.category ?? "")}</span>
+              </div>
+              <div class="chal-card__desc">${escapeHtml(isExpanded ? (c.description ?? "") : truncate(c.description, 70))}</div>
+              ${
+                isExpanded
+                  ? `<dl class="chal-card__meta">
+                      <dt>Points</dt><dd>${escapeHtml(c.points ?? "")}</dd>
+                      <dt>Difficulty</dt><dd>${escapeHtml(c.difficulty ?? "")}</dd>
+                      <dt>Author</dt><dd>${escapeHtml(c.author ?? "")}</dd>
+                    </dl>`
+                  : ""
+              }
+            </div>`;
+        })
+        .join("");
+
+      modalChalGrid.querySelectorAll(".chal-card").forEach((card) => {
+        card.addEventListener("click", (e) => {
+          if (e.target.classList.contains("chal-card__check")) return;
+          const name = card.dataset.name;
+          if (modalExpandedNames.has(name)) modalExpandedNames.delete(name);
+          else modalExpandedNames.add(name);
+          renderModalGrid();
+        });
+      });
+
+      modalChalGrid.querySelectorAll(".chal-card__check").forEach((cb) => {
+        cb.addEventListener("click", (e) => e.stopPropagation());
+        cb.addEventListener("change", () => {
+          const name = cb.dataset.name;
+          if (cb.checked) selectedToAdd.add(name);
+          else selectedToAdd.delete(name);
+          cb.closest(".chal-card").classList.toggle("is-selected", cb.checked);
+          confirmAddChallengesBtn.textContent = selectedToAdd.size > 0 ? `Add selected (${selectedToAdd.size})` : "Add selected";
+        });
+      });
+    }
+
+    openAddChallengeBtn.addEventListener("click", openModal);
+    closeAddChallengeModal.addEventListener("click", closeModal);
+    addChallengeModal.addEventListener("click", (e) => {
+      if (e.target === addChallengeModal) closeModal();
+    });
+
+    confirmAddChallengesBtn.addEventListener("click", async () => {
+      const names = Array.from(selectedToAdd);
+      if (names.length === 0) {
+        alert("Select at least one challenge.");
+        return;
+      }
+
+      confirmAddChallengesBtn.disabled = true;
+      confirmAddChallengesBtn.textContent = "Adding…";
+
+      try {
+        const result = await postJson(CONFIG.CREATE_EVENT_URL, { eventName, challenges: names });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          showMsg(addChallengeMsg, d.message || "Failed to add challenges.", "bad");
+          confirmAddChallengesBtn.disabled = false;
+          confirmAddChallengesBtn.textContent = "Add selected";
+          return;
+        }
+
+        closeModal();
+        showMsg(addChallengeMsg, "Challenges added.", "good");
+        loadChallenges();
+      } catch (err) {
+        showMsg(addChallengeMsg, "Couldn't reach the server.", "bad");
+      } finally {
+        confirmAddChallengesBtn.disabled = false;
+        confirmAddChallengesBtn.textContent = "Add selected";
+      }
+    });
+
+    async function saveChallenge(card) {
+      const originalName = card.dataset.name;
+      const newName = card.querySelector(".edit-name").value.trim();
+      const category = card.querySelector(".edit-category").value.trim();
+      const description = card.querySelector(".edit-description").value.trim();
+      const points = card.querySelector(".edit-points").value.trim();
+      const difficulty = card.querySelector(".edit-difficulty").value.trim();
+      const author = card.querySelector(".edit-author").value.trim();
+
+      const changes = {};
+      if (newName && newName !== originalName) changes.name = newName;
+      if (category) changes.category = category;
+      if (description) changes.description = description;
+      if (points !== "") changes.points = Number(points);
+      if (difficulty) changes.difficulty = difficulty;
+      if (author) changes.author = author;
+
+      if (Object.keys(changes).length === 0) {
+        editingNames.delete(originalName);
+        renderChallengeGrid();
+        return;
+      }
+
+      const saveBtn = card.querySelector('[data-action="save-challenge"]');
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving…";
+
+      try {
+        const result = await putJson(CONFIG.CREATE_EVENT_URL, { eventName, challengeName: originalName, changes });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          alert(d.message || "Failed to update challenge.");
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Save";
+          return;
+        }
+
+        const idx = allChallenges.findIndex((c) => c.name === originalName);
+        if (idx !== -1) {
+          allChallenges[idx] = { ...allChallenges[idx], ...changes };
+        }
+        editingNames.delete(originalName);
+        expandedNames.delete(originalName);
+        renderChallengeGrid();
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save";
+      }
+    }
+  </script>
+</body>
+</html>

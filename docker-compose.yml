@@ -1,0 +1,19 @@
+services:
+        web:
+                container_name: web
+                build: ./MACHINE/www
+                ports:
+                        - 8000:80
+                depends_on:
+                        - api
+
+        api:
+                container_name: webAPI
+                build: ./MACHINE/api
+                environment:
+                        - HOST_PWD=${PWD}
+                volumes: 
+                        - ./MACHINE/api/challenges:/var/www/data/challenges
+                        - /var/run/docker.sock:/var/run/docker.sock
+                ports: 
+                        - 8001:80

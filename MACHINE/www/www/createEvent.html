@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Create event</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="dash">
+    <div class="dash__topbar">
+      <div class="rail__mark">the<span>vault</span></div>
+      <a href="dashboard.html" class="users__back">&larr; Back to dashboard</a>
+    </div>
+
+    <main class="stage" style="padding-top: 24px; align-items: flex-start;">
+      <div class="ticket ticket--wide">
+        <div class="ticket__perf"></div>
+
+        <p class="ticket__eyebrow">Events</p>
+        <h1>Create event</h1>
+
+        <div id="msg" class="msg"></div>
+
+        <form id="eventForm" novalidate>
+          <div class="field">
+            <label for="eventName">Name</label>
+            <input type="text" id="eventName" required />
+            <div class="field__hint">Letters, numbers, spaces, "_" and "-" only.</div>
+          </div>
+
+          <div class="field">
+            <label for="eventDescription">Description</label>
+            <input type="text" id="eventDescription" required />
+            <div class="field__hint">Letters, numbers, spaces, "_" and "-" only.</div>
+          </div>
+
+          <div class="field">
+            <label for="startDate">Start date</label>
+            <input type="datetime-local" id="startDate" required />
+          </div>
+
+          <div class="field">
+            <label for="endDate">End date</label>
+            <input type="datetime-local" id="endDate" required />
+          </div>
+
+          <div class="field">
+            <label for="peoplePerTeam">People per team</label>
+            <input type="number" id="peoplePerTeam" min="1" step="1" required />
+          </div>
+
+          <div class="event__section">
+            <h2>Challenges</h2>
+            <p class="event__section-sub">Browse the catalog below, then pick how challenges get attached to this event.</p>
+
+            <div class="chal-toolbar">
+              <span class="chal-toolbar__count" id="chalCount">Loading challenges…</span>
+            </div>
+            <div class="chal-grid" id="chalGrid"></div>
+            <datalist id="categoryOptions"></datalist>
+          </div>
+
+          <div class="event__section">
+            <div class="type-tabs" id="typeTabs">
+              <label class="type-tab is-active" data-type="simple">
+                <input type="radio" name="challengeType" value="simple" checked /> Simple
+              </label>
+              <label class="type-tab" data-type="complex">
+                <input type="radio" name="challengeType" value="complex" /> Complex
+              </label>
+              <label class="type-tab" data-type="selected">
+                <input type="radio" name="challengeType" value="selected" /> Selected
+              </label>
+            </div>
+
+            <div class="type-panel is-active" id="panelSimple">
+              <div class="field">
+                <label for="simpleCount">Number of random challenges</label>
+                <input type="number" id="simpleCount" min="1" step="1" value="5" />
+              </div>
+            </div>
+
+            <div class="type-panel" id="panelComplex">
+              <p class="event__section-sub">Pick a category and how many random challenges to pull from it. Type to see known categories.</p>
+              <div class="complex-rows" id="complexRows"></div>
+              <button type="button" class="teams__mini-btn" id="addComplexRow">+ Add category</button>
+            </div>
+
+            <div class="type-panel" id="panelSelected">
+              <p class="event__section-sub" style="margin-bottom: 0;">Click a challenge above to check it in — <span id="selectedCount">0 selected</span>.</p>
+            </div>
+          </div>
+
+          <button type="submit" class="submit" id="submitBtn" style="margin-top: 20px;">Create event</button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const form = document.getElementById("eventForm");
+    const msg = document.getElementById("msg");
+    const submitBtn = document.getElementById("submitBtn");
+    const chalGrid = document.getElementById("chalGrid");
+    const chalCount = document.getElementById("chalCount");
+    const categoryOptionsEl = document.getElementById("categoryOptions");
+    const complexRowsEl = document.getElementById("complexRows");
+    const selectedCountEl = document.getElementById("selectedCount");
+
+    const PANEL_IDS = { simple: "panelSimple", complex: "panelComplex", selected: "panelSelected" };
+
+    let allChallenges = [];
+    let expandedNames = new Set();
+    let selectedNames = new Set();
+    let currentType = "simple";
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+
+    function truncate(str, n) {
+      const s = String(str ?? "");
+      return s.length > n ? s.slice(0, n) + "…" : s;
+    }
+
+    function toSqlDateTime(localValue) {
+      if (!localValue) return "";
+      const d = new Date(localValue); // datetime-local values are parsed as local time
+      if (isNaN(d)) return "";
+      return d.toISOString().slice(0, 19).replace("T", " "); // stored as UTC
+    }
+
+    // ---------- session gate ----------
+    (async () => {
+      try {
+        const result = await getJson(CONFIG.CHECK_SESSION_URL);
+        const d = result.data || {};
+        if (!d.loggedIn) { window.location.href = "login.html"; return; }
+        if (!d.isCreator) { window.location.href = "dashboard.html"; return; }
+        loadChallenges();
+      } catch (err) {
+        window.location.href = "login.html";
+      }
+    })();
+
+    // ---------- challenge catalog ----------
+    async function loadChallenges() {
+      try {
+        const result = await getJson(CONFIG.GET_CHALLENGES_FOR_CTF_URL);
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          chalCount.textContent = "Couldn't load challenges.";
+          return;
+        }
+
+        allChallenges = d.challenges || [];
+        populateCategoryDatalist();
+        renderChallengeGrid();
+      } catch (err) {
+        chalCount.textContent = "Couldn't reach the server.";
+      }
+    }
+
+    function populateCategoryDatalist() {
+      const categories = [...new Set(allChallenges.map((c) => c.category).filter(Boolean))];
+      categoryOptionsEl.innerHTML = categories.map((c) => `<option value="${escapeHtml(c)}"></option>`).join("");
+    }
+
+    function renderChallengeGrid() {
+      chalCount.textContent = `${allChallenges.length} challenge${allChallenges.length === 1 ? "" : "s"}`;
+      chalGrid.classList.toggle("is-select-mode", currentType === "selected");
+
+      if (allChallenges.length === 0) {
+        chalGrid.innerHTML = `<div class="chal-empty">No challenges found.</div>`;
+        return;
+      }
+
+      chalGrid.innerHTML = allChallenges
+        .map((c) => {
+          const name = c.name ?? "";
+          const isExpanded = expandedNames.has(name);
+          const isSelected = selectedNames.has(name);
+
+          return `
+            <div class="chal-card ${isSelected ? "is-selected" : ""}" data-name="${escapeHtml(name)}">
+              <input type="checkbox" class="chal-card__check" data-name="${escapeHtml(name)}" ${isSelected ? "checked" : ""} />
+              <div class="chal-card__top">
+                <span class="chal-card__name">${escapeHtml(name)}</span>
+                <span class="chal-card__category">${escapeHtml(c.category ?? "")}</span>
+              </div>
+              <div class="chal-card__desc">${escapeHtml(isExpanded ? (c.description ?? "") : truncate(c.description, 70))}</div>
+              ${
+                isExpanded
+                  ? `<dl class="chal-card__meta">
+                      <dt>Points</dt><dd>${escapeHtml(c.points ?? "")}</dd>
+                      <dt>Difficulty</dt><dd>${escapeHtml(c.difficulty ?? "")}</dd>
+                      <dt>Author</dt><dd>${escapeHtml(c.author ?? "")}</dd>
+                    </dl>`
+                  : ""
+              }
+            </div>`;
+        })
+        .join("");
+
+      chalGrid.querySelectorAll(".chal-card").forEach((card) => {
+        card.addEventListener("click", (e) => {
+          if (e.target.classList.contains("chal-card__check")) return;
+          const name = card.dataset.name;
+          if (expandedNames.has(name)) expandedNames.delete(name);
+          else expandedNames.add(name);
+          renderChallengeGrid();
+        });
+      });
+
+      chalGrid.querySelectorAll(".chal-card__check").forEach((cb) => {
+        cb.addEventListener("click", (e) => e.stopPropagation());
+        cb.addEventListener("change", () => {
+          const name = cb.dataset.name;
+          if (cb.checked) selectedNames.add(name);
+          else selectedNames.delete(name);
+          updateSelectedCount();
+          cb.closest(".chal-card").classList.toggle("is-selected", cb.checked);
+        });
+      });
+    }
+
+    function updateSelectedCount() {
+      selectedCountEl.textContent = `${selectedNames.size} selected`;
+    }
+
+    // ---------- challenge-selection type tabs ----------
+    document.querySelectorAll('input[name="challengeType"]').forEach((radio) => {
+      radio.addEventListener("change", () => {
+        currentType = radio.value;
+        document.querySelectorAll("#typeTabs .type-tab").forEach((tab) => {
+          tab.classList.toggle("is-active", tab.dataset.type === currentType);
+        });
+        document.querySelectorAll(".type-panel").forEach((panel) => {
+          panel.classList.toggle("is-active", panel.id === PANEL_IDS[currentType]);
+        });
+        renderChallengeGrid();
+      });
+    });
+
+    // ---------- complex rows ----------
+    function addComplexRow(category, count) {
+      const row = document.createElement("div");
+      row.className = "complex-row";
+      row.innerHTML = `
+        <input type="text" class="complex-row__category" placeholder="Category" list="categoryOptions" value="${escapeHtml(category || "")}" />
+        <input type="number" class="complex-row__count" min="1" step="1" value="${count || 1}" />
+        <button type="button" class="teams__mini-btn teams__mini-btn--danger">Remove</button>
+      `;
+      row.querySelector("button").addEventListener("click", () => row.remove());
+      complexRowsEl.appendChild(row);
+    }
+
+    document.getElementById("addComplexRow").addEventListener("click", () => addComplexRow());
+    addComplexRow();
+
+    // ---------- submit ----------
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideMsg(msg);
+
+      const name = document.getElementById("eventName").value.trim();
+      const description = document.getElementById("eventDescription").value.trim();
+      const startDate = toSqlDateTime(document.getElementById("startDate").value);
+      const endDate = toSqlDateTime(document.getElementById("endDate").value);
+      const peoplePerTeam = Number(document.getElementById("peoplePerTeam").value);
+
+      if (!name || !description || !startDate || !endDate || !peoplePerTeam) {
+        showMsg(msg, "Fill in all event fields.", "bad");
+        return;
+      }
+
+      let challengesPayload;
+      if (currentType === "simple") {
+        const count = parseInt(document.getElementById("simpleCount").value, 10);
+        if (!count || count <= 0) {
+          showMsg(msg, "Enter how many random challenges to include.", "bad");
+          return;
+        }
+        challengesPayload = { type: "simple", challenges: count };
+      } else if (currentType === "complex") {
+        const rows = Array.from(complexRowsEl.querySelectorAll(".complex-row"))
+          .map((row) => {
+            const category = row.querySelector(".complex-row__category").value.trim();
+            const count = parseInt(row.querySelector(".complex-row__count").value, 10);
+            return [category, count];
+          })
+          .filter(([category, count]) => category && count > 0);
+
+        if (rows.length === 0) {
+          showMsg(msg, "Add at least one category with a challenge count.", "bad");
+          return;
+        }
+        challengesPayload = { type: "complex", challenges: rows };
+      } else {
+        const names = Array.from(selectedNames);
+        if (names.length === 0) {
+          showMsg(msg, "Select at least one challenge below.", "bad");
+          return;
+        }
+        challengesPayload = { type: "selected", challenges: names };
+      }
+
+      setBusy(submitBtn, true, "Creating…", "Create event");
+
+      try {
+        // 1. Resolve the challenge-selection strategy into concrete challenge names.
+        const chalResult = await postJson(CONFIG.GET_CHALLENGES_FOR_CTF_URL, challengesPayload);
+        const chalData = chalResult.data || {};
+        if (chalData.code !== "ok") {
+          showMsg(msg, chalData.message || "Failed to resolve challenges.", "bad");
+          return;
+        }
+
+        const resolved = Array.isArray(chalData.challenges)
+          ? chalData.challenges
+          : Object.values(chalData.challenges || {}).flat();
+        const challengeNames = resolved.map((c) => c.name).filter(Boolean);
+
+        if (challengeNames.length === 0) {
+          showMsg(msg, "No challenges matched that selection.", "bad");
+          return;
+        }
+
+        // 2. Create the event itself.
+        const eventResult = await postJson(CONFIG.ADMINISTRATE_CTF_URL, {
+          name,
+          description,
+          startDate,
+          endDate,
+          peoplePerTeam,
+        });
+        const eventData = eventResult.data || {};
+        if (eventData.code !== "ok") {
+          showMsg(msg, eventData.message || "Failed to create the event.", "bad");
+          return;
+        }
+
+        // 3. Attach the resolved challenges to the event that was just created.
+        const attachResult = await postJson(CONFIG.CREATE_EVENT_URL, {
+          eventName: name,
+          challenges: challengeNames,
+        });
+        const attachData = attachResult.data || {};
+        if (attachData.code !== "ok") {
+          showMsg(msg, `Event created, but attaching challenges failed: ${attachData.message || "unknown error"}`, "bad");
+          return;
+        }
+
+        showMsg(msg, "Event created.", "good");
+        form.reset();
+        selectedNames.clear();
+        expandedNames.clear();
+        updateSelectedCount();
+        renderChallengeGrid();
+      } catch (err) {
+        showMsg(msg, "Couldn't reach the server.", "bad");
+      } finally {
+        setBusy(submitBtn, false, "Creating…", "Create event");
+      }
+    });
+  </script>
+</body>
+</html>

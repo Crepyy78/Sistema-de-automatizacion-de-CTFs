@@ -1,0 +1,13 @@
+services:
+  machine:
+    image: reto-base
+    build: machine
+    ports:
+      - ${PORT}:54475
+    secrets:
+      - source: flag
+        target: "/flag/flag.txt"
+
+secrets:
+  flag:
+    file: "${FLAGFILE}"

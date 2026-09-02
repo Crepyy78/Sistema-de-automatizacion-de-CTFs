@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="dash">
+    <div class="dash__topbar">
+      <div class="rail__mark">the<span>vault</span></div>
+      <a href="#" class="logout-link" id="logoutLink">Sign out</a>
+    </div>
+
+    <div class="dash__body">
+
+      <!-- ---------- events / ranking ---------- -->
+      <section>
+        <div class="type-tabs" id="hubTabs">
+          <label class="type-tab is-active" data-tab="events">
+            <input type="radio" name="hubTab" value="events" checked /> Events
+          </label>
+          <label class="type-tab" data-tab="ranking">
+            <input type="radio" name="hubTab" value="ranking" /> Ranking
+          </label>
+        </div>
+
+        <div class="type-panel is-active" id="panelEvents">
+          <div class="ledger__head">
+            <h2>Events</h2>
+            <p id="eventCount"></p>
+          </div>
+          <div class="ledger" id="ledger">
+            <!-- skeleton rows while loading -->
+            <div class="ledger__skel"><div class="ledger__skel-bar"></div><div class="ledger__skel-bar"></div></div>
+            <div class="ledger__skel"><div class="ledger__skel-bar"></div><div class="ledger__skel-bar"></div></div>
+            <div class="ledger__skel"><div class="ledger__skel-bar"></div><div class="ledger__skel-bar"></div></div>
+          </div>
+
+          <div class="teams__create" style="margin-top: 20px;">
+            <h3>Join an event as mantainer</h3>
+            <div id="joinEventMsg" class="msg"></div>
+            <form id="joinEventForm" novalidate>
+              <div class="field">
+                <label for="eventCode">Invite code</label>
+                <input type="text" id="eventCode" name="eventCode" required />
+              </div>
+              <button type="submit" class="submit" id="joinEventBtn">Join event</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="type-panel" id="panelRanking">
+          <div class="type-tabs" id="rankingTabs">
+            <label class="type-tab is-active" data-tab="users">
+              <input type="radio" name="rankingTab" value="users" checked /> Users
+            </label>
+            <label class="type-tab" data-tab="teams">
+              <input type="radio" name="rankingTab" value="teams" /> Teams
+            </label>
+          </div>
+
+          <div class="type-panel is-active" id="panelRankingUsers">
+            <p class="event__section-sub" id="rankingUsersSub">Loading ranking…</p>
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th style="width: 15%;">#</th>
+                  <th>User</th>
+                  <th style="width: 25%; text-align: right;">Points</th>
+                </tr>
+              </thead>
+              <tbody id="rankingUsersRows">
+                <tr><td colspan="3" style="text-align:center; color: var(--muted); font-family: var(--mono); font-size: 12px;">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="type-panel" id="panelRankingTeams">
+            <p class="event__section-sub" id="rankingTeamsSub">Loading ranking…</p>
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th style="width: 15%;">#</th>
+                  <th>Team</th>
+                  <th style="width: 25%; text-align: right;">Points</th>
+                </tr>
+              </thead>
+              <tbody id="rankingTeamsRows">
+                <tr><td colspan="3" style="text-align:center; color: var(--muted); font-family: var(--mono); font-size: 12px;">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- profile ---------- -->
+      <aside class="profile">
+        <p class="profile__eyebrow">Signed in as</p>
+        <p class="profile__user" id="profileUser">—</p>
+
+        <!--
+          Setting 2 remains an unspecified placeholder. Swap the button
+          for a real control and wire it to the relevant endpoint when
+          ready.
+        -->
+        <a href="profile.html" class="profile__opt" style="text-decoration:none; cursor:pointer;">
+          <span class="profile__opt-label">
+            <span class="profile__opt-title">Edit profile</span>
+            <span class="profile__opt-sub">username, password, 2FA</span>
+          </span>
+          <span class="profile__badge">Open</span>
+        </a>
+        <a href="teams.html" class="profile__opt" style="text-decoration:none; cursor:pointer;">
+          <span class="profile__opt-label">
+            <span class="profile__opt-title">Manage teams</span>
+            <span class="profile__opt-sub">view, create, leave</span>
+          </span>
+          <span class="profile__badge">Open</span>
+        </a>
+        <a href="createEvent.html" class="profile__opt" id="createEventOpt" style="display:none; text-decoration:none; cursor:pointer;">
+          <span class="profile__opt-label">
+            <span class="profile__opt-title">Create event</span>
+            <span class="profile__opt-sub">set up a new CTF</span>
+          </span>
+          <span class="profile__badge">Open</span>
+        </a>
+        <a href="containers.html" class="profile__opt" style="text-decoration:none; cursor:pointer;">
+          <span class="profile__opt-label">
+            <span class="profile__opt-title">Running challenges</span>
+            <span class="profile__opt-sub">view and delete containers</span>
+          </span>
+          <span class="profile__badge">Open</span>
+        </a>
+        <a href="manageUsers.html" class="profile__opt" id="manageUsersOpt" style="display:none; text-decoration:none; cursor:pointer;">
+          <span class="profile__opt-label">
+            <span class="profile__opt-title">Manage users</span>
+            <span class="profile__opt-sub">add, rename, promote</span>
+          </span>
+          <span class="profile__badge">Open</span>
+        </a>
+      </aside>
+
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const ledger = document.getElementById("ledger");
+    const eventCount = document.getElementById("eventCount");
+    const profileUser = document.getElementById("profileUser");
+    const joinEventForm = document.getElementById("joinEventForm");
+    const joinEventMsg = document.getElementById("joinEventMsg");
+    const joinEventBtn = document.getElementById("joinEventBtn");
+
+    const hubTabs = document.getElementById("hubTabs");
+    const panelEvents = document.getElementById("panelEvents");
+    const panelRanking = document.getElementById("panelRanking");
+    const rankingTabs = document.getElementById("rankingTabs");
+    const panelRankingUsers = document.getElementById("panelRankingUsers");
+    const panelRankingTeams = document.getElementById("panelRankingTeams");
+    const rankingUsersSub = document.getElementById("rankingUsersSub");
+    const rankingUsersRows = document.getElementById("rankingUsersRows");
+    const rankingTeamsSub = document.getElementById("rankingTeamsSub");
+    const rankingTeamsRows = document.getElementById("rankingTeamsRows");
+    let globalRankingLoaded = false;
+
+    profileUser.textContent = "—";
+
+    function formatDate(value) {
+      if (!value) return "";
+      const d = new Date(value.replace(" ", "T") + "Z"); // stored value is UTC
+      if (isNaN(d)) return value; // not a parseable date — show raw
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+
+    function renderEvents(events) {
+      if (!events || events.length === 0) {
+        ledger.innerHTML = `<div class="ledger__empty">No events yet.</div>`;
+        eventCount.textContent = "";
+        return;
+      }
+
+      eventCount.textContent = `${events.length} listed`;
+      ledger.innerHTML = events
+        .map((ev) => {
+          const name = ev.name ?? "Untitled";
+          const editLink = ev.isMantainer
+            ? `<a class="teams__mini-btn" style="text-decoration:none;" href="editEvent.html?${new URLSearchParams({
+                name,
+                startDate: ev.startDate ?? "",
+                endDate: ev.endDate ?? "",
+                isPublic: ev.isPublic ? "1" : "0",
+              })}">Edit</a>`
+            : "";
+          const deleteBtn =
+            !ev.isPublic && ev.isMantainer
+              ? `<button type="button" class="teams__mini-btn teams__mini-btn--danger" data-action="delete-event" data-name="${escapeHtml(name)}">Delete</button>`
+              : "";
+          return `
+        <div class="ledger__row ${ev.isPublic ? "" : "ledger__row--unpublished"}" data-name="${escapeHtml(name)}" data-start="${escapeHtml(ev.startDate ?? "")}" data-end="${escapeHtml(ev.endDate ?? "")}" data-public="${ev.isPublic ? "1" : "0"}" data-mantainer="${ev.isMantainer ? "1" : "0"}">
+          <span class="ledger__name-wrap">
+            <span class="ledger__name">${escapeHtml(name)}</span>
+            ${ev.isPublic ? "" : `<span class="ledger__badge--unpublished">Unpublished</span>`}
+          </span>
+          <span class="ledger__dates">${escapeHtml(formatDate(ev.startDate))} – ${escapeHtml(formatDate(ev.endDate))}</span>
+          <span class="ledger__actions">${editLink}${deleteBtn}</span>
+        </div>`;
+        })
+        .join("");
+
+      ledger.querySelectorAll('[data-action="delete-event"]').forEach((btn) => {
+        btn.addEventListener("click", () => deleteEvent(btn.dataset.name, btn));
+      });
+
+      ledger.querySelectorAll(".ledger__row[data-name]").forEach((row) => {
+        row.addEventListener("click", (e) => {
+          if (e.target.closest("a, button")) return;
+          const eventParams = new URLSearchParams({
+            name: row.dataset.name,
+            startDate: row.dataset.start,
+            endDate: row.dataset.end,
+            isPublic: row.dataset.public,
+            isMantainer: row.dataset.mantainer,
+          });
+          window.location.href = `event.html?${eventParams}`;
+        });
+      });
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+
+    async function deleteEvent(name, btn) {
+      if (!confirm(`Delete event "${name}"? This can't be undone.`)) return;
+
+      btn.disabled = true;
+      btn.textContent = "…";
+
+      try {
+        const result = await deleteJson(CONFIG.ADMINISTRATE_CTF_URL, { name });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          alert(d.message || "Failed to delete event.");
+          btn.disabled = false;
+          btn.textContent = "Delete";
+          return;
+        }
+
+        loadEvents();
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        btn.disabled = false;
+        btn.textContent = "Delete";
+      }
+    }
+
+    async function loadEvents() {
+      try {
+        const result = await getJson(CONFIG.HUB_URL);
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          // Not authenticated (or session expired) — send back to login.
+          window.location.href = "login.html";
+          return;
+        }
+
+        renderEvents(d.events);
+      } catch (err) {
+        ledger.innerHTML = `<div class="ledger__error">Couldn't load events. Check your connection and try again.</div>`;
+      }
+    }
+
+    async function checkSession() {
+      try {
+        const result = await getJson(CONFIG.CHECK_SESSION_URL);
+        const d = result.data || {};
+
+        if (!d.loggedIn) {
+          window.location.href = "login.html";
+          return;
+        }
+
+        profileUser.textContent = d.username || "—";
+
+        if (d.isAdmin) {
+          document.getElementById("manageUsersOpt").style.display = "flex";
+        }
+        if (d.isCreator) {
+          document.getElementById("createEventOpt").style.display = "flex";
+        }
+      } catch (err) {
+        // Can't confirm session state — safest default is to bounce to login.
+        window.location.href = "login.html";
+      }
+    }
+
+    // ---------- hub tabs ----------
+    hubTabs.querySelectorAll(".type-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const tabName = tab.dataset.tab;
+        hubTabs.querySelectorAll(".type-tab").forEach((t) => t.classList.toggle("is-active", t === tab));
+        panelEvents.classList.toggle("is-active", tabName === "events");
+        panelRanking.classList.toggle("is-active", tabName === "ranking");
+
+        if (tabName === "ranking" && !globalRankingLoaded) {
+          globalRankingLoaded = true;
+          loadGlobalRanking();
+        }
+      });
+    });
+
+    rankingTabs.querySelectorAll(".type-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const tabName = tab.dataset.tab;
+        rankingTabs.querySelectorAll(".type-tab").forEach((t) => t.classList.toggle("is-active", t === tab));
+        panelRankingUsers.classList.toggle("is-active", tabName === "users");
+        panelRankingTeams.classList.toggle("is-active", tabName === "teams");
+      });
+    });
+
+    // ---------- global ranking ----------
+    async function loadGlobalRanking() {
+      try {
+        const result = await getJson(CONFIG.GET_GLOBAL_RANKING_URL);
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          rankingUsersSub.textContent = d.message || "Couldn't load ranking.";
+          rankingUsersSub.style.display = "block";
+          rankingTeamsSub.textContent = d.message || "Couldn't load ranking.";
+          rankingTeamsSub.style.display = "block";
+          return;
+        }
+
+        renderGlobalRanking(rankingUsersRows, rankingUsersSub, d.users || [], "username", "No users yet.");
+        renderGlobalRanking(rankingTeamsRows, rankingTeamsSub, d.teams || [], "teamName", "No teams yet.");
+      } catch (err) {
+        rankingUsersSub.textContent = "Couldn't reach the server.";
+        rankingUsersSub.style.display = "block";
+        rankingTeamsSub.textContent = "Couldn't reach the server.";
+        rankingTeamsSub.style.display = "block";
+      }
+    }
+
+    function renderGlobalRanking(tbody, subEl, rows, nameKey, emptyMsg) {
+      if (rows.length === 0) {
+        subEl.textContent = emptyMsg;
+        subEl.style.display = "block";
+        tbody.innerHTML = "";
+        return;
+      }
+
+      subEl.style.display = "none";
+      tbody.innerHTML = rows
+        .map(
+          (row) => `
+        <tr>
+          <td class="ranking-table__rank">#${escapeHtml(row.rank)}</td>
+          <td>${escapeHtml(row[nameKey])}</td>
+          <td class="ranking-table__points">${escapeHtml(row.points)}</td>
+        </tr>`
+        )
+        .join("");
+    }
+
+    checkSession();
+    loadEvents();
+
+    document.getElementById("logoutLink").addEventListener("click", async (e) => {
+      e.preventDefault();
+      try {
+        await deleteRequest(CONFIG.LOGIN_URL);
+      } finally {
+        window.location.href = "login.html";
+      }
+    });
+
+    joinEventForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideMsg(joinEventMsg);
+
+      const eventCode = document.getElementById("eventCode").value.trim();
+
+      if (!eventCode) {
+        showMsg(joinEventMsg, "Invite code is required.", "bad");
+        return;
+      }
+
+      setBusy(joinEventBtn, true, "Joining…", "Join event");
+
+      try {
+        const result = await postJson(CONFIG.USE_EVENT_INVITE_URL, { eventCode });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          showMsg(joinEventMsg, d.message || "Failed to join event.", "bad");
+          return;
+        }
+
+        showMsg(joinEventMsg, d.message || "Joined event.", "good");
+        joinEventForm.reset();
+        loadEvents();
+      } catch (err) {
+        showMsg(joinEventMsg, "Couldn't reach the server.", "bad");
+      } finally {
+        setBusy(joinEventBtn, false, "Joining…", "Join event");
+      }
+    });
+  </script>
+</body>
+</html>

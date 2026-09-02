@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Manage teams</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="dash">
+    <div class="dash__topbar">
+      <div class="rail__mark">the<span>vault</span></div>
+      <a href="dashboard.html" class="users__back">&larr; Back to dashboard</a>
+    </div>
+
+    <div class="teams">
+
+      <!-- ---------- left: list + create ---------- -->
+      <div>
+        <div class="teams__head">
+          <h2>Your teams</h2>
+        </div>
+        <div class="teams__list" id="teamsList">
+          <div class="teams__empty">Loading…</div>
+        </div>
+
+        <div class="teams__create">
+          <h3>Create a team</h3>
+          <div id="createMsg" class="msg"></div>
+          <form id="createForm" novalidate>
+            <div class="field">
+              <label for="teamName">Name</label>
+              <input type="text" id="teamName" name="teamName" required />
+            </div>
+            <div class="field">
+              <label for="teamDesc">Description</label>
+              <input type="text" id="teamDesc" name="teamDesc" />
+            </div>
+            <button type="submit" class="submit" id="createBtn">Create team</button>
+          </form>
+        </div>
+
+        <div class="teams__create" style="margin-top: 20px;">
+          <h3>Join a team</h3>
+          <div id="joinMsg" class="msg"></div>
+          <form id="joinForm" novalidate>
+            <div class="field">
+              <label for="teamCode">Invite code</label>
+              <input type="text" id="teamCode" name="teamCode" required />
+            </div>
+            <button type="submit" class="submit" id="joinBtn">Join team</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- ---------- right: detail ---------- -->
+      <div class="teams__detail" id="teamDetail">
+        <p class="teams__detail-placeholder">Select a team on the left to see details.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const teamsList = document.getElementById("teamsList");
+    const teamDetail = document.getElementById("teamDetail");
+    const createForm = document.getElementById("createForm");
+    const createMsg = document.getElementById("createMsg");
+    const createBtn = document.getElementById("createBtn");
+    const joinForm = document.getElementById("joinForm");
+    const joinMsg = document.getElementById("joinMsg");
+    const joinBtn = document.getElementById("joinBtn");
+
+    let currentTeams = [];
+    let activeTeamName = null;
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+
+    // ---------- session guard ----------
+    (async () => {
+      try {
+        const result = await getJson(CONFIG.CHECK_SESSION_URL);
+        const d = result.data || {};
+        if (!d.loggedIn) { window.location.href = "login.html"; return; }
+        loadTeams();
+      } catch (err) {
+        window.location.href = "login.html";
+      }
+    })();
+
+    // ---------- list ----------
+    async function loadTeams() {
+      try {
+        const result = await getJson(CONFIG.MANAGE_TEAMS_URL);
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          teamsList.innerHTML = `<div class="teams__empty">Couldn't load teams.</div>`;
+          return;
+        }
+
+        // Confirmed shape: { code, teams: [{ name, description }] }
+        currentTeams = d.teams || [];
+        renderTeamsList();
+      } catch (err) {
+        teamsList.innerHTML = `<div class="teams__empty">Couldn't reach the server.</div>`;
+      }
+    }
+
+    function renderTeamsList() {
+      if (currentTeams.length === 0) {
+        teamsList.innerHTML = `<div class="teams__empty">You're not on any teams yet.</div>`;
+        return;
+      }
+
+      teamsList.innerHTML = currentTeams
+        .map((team) => {
+          const name = team.name ?? "";
+          const desc = team.description ?? "";
+          const active = name === activeTeamName ? "is-active" : "";
+          return `
+            <div class="teams__item ${active}" data-team="${escapeHtml(name)}">
+              <div>
+                <div class="teams__item-name">${escapeHtml(name)}</div>
+                ${desc ? `<div class="teams__item-desc">${escapeHtml(desc)}</div>` : ""}
+              </div>
+              <div class="teams__item-actions">
+                <button class="teams__mini-btn teams__mini-btn--danger" data-action="delete" data-team="${escapeHtml(name)}">Delete</button>
+              </div>
+            </div>`;
+        })
+        .join("");
+
+      teamsList.querySelectorAll(".teams__item").forEach((el) => {
+        el.addEventListener("click", (e) => {
+          // Ignore clicks on the delete button itself — handled separately below.
+          if (e.target.closest("[data-action]")) return;
+          openTeam(el.dataset.team);
+        });
+      });
+
+      teamsList.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          deleteTeam(btn.dataset.team, btn);
+        });
+      });
+    }
+
+    // ---------- detail ----------
+    async function openTeam(name) {
+      activeTeamName = name;
+      renderTeamsList(); // refresh active-state highlighting
+
+      teamDetail.innerHTML = `<p class="teams__detail-placeholder">Loading “${escapeHtml(name)}”…</p>`;
+
+      try {
+        const result = await getJson(`${CONFIG.MANAGE_TEAMS_URL}?team=${encodeURIComponent(name)}`);
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          teamDetail.innerHTML = `<p class="teams__detail-placeholder">Couldn't load that team.</p>`;
+          return;
+        }
+
+        renderTeamDetail(d);
+      } catch (err) {
+        teamDetail.innerHTML = `<p class="teams__detail-placeholder">Couldn't reach the server.</p>`;
+      }
+    }
+
+    function renderTeamDetail(d) {
+      const activeTeam = currentTeams.find((t) => t.name === activeTeamName);
+      const description = activeTeam ? activeTeam.description : "";
+      const members = Array.isArray(d.users) ? d.users : [];
+
+      const memberItems = members.length
+        ? members
+            .map(
+              (m) => `
+                <li class="teams__member">
+                  <span>${escapeHtml(m?.name ?? "")}</span>
+                  <button type="button" class="teams__mini-btn teams__mini-btn--danger" data-action="remove-member" data-name="${escapeHtml(m?.name ?? "")}">Remove</button>
+                </li>`
+            )
+            .join("")
+        : `<li class="teams__member teams__member--empty">No members yet.</li>`;
+
+      teamDetail.innerHTML = `
+        <h3>${escapeHtml(activeTeamName)}</h3>
+        ${description ? `<p class="teams__item-desc" style="margin-bottom: 18px;">${escapeHtml(description)}</p>` : ""}
+
+        <h4 class="teams__section-title">Members (${members.length})</h4>
+        <ul class="teams__members">${memberItems}</ul>
+
+        <div class="teams__invite">
+          <button type="button" class="teams__mini-btn" id="inviteBtn">Generate invite code</button>
+          <div class="msg" id="inviteMsg" style="margin-top: 10px; margin-bottom: 0;"></div>
+        </div>
+      `;
+
+      document.getElementById("inviteBtn").addEventListener("click", createInviteCode);
+
+      teamDetail.querySelectorAll('[data-action="remove-member"]').forEach((btn) => {
+        btn.addEventListener("click", () => removeMember(btn.dataset.name, btn));
+      });
+    }
+
+    // ---------- remove member ----------
+    async function removeMember(name, btn) {
+      if (!confirm(`Remove "${name}" from "${activeTeamName}"?`)) return;
+
+      btn.disabled = true;
+      btn.textContent = "…";
+
+      try {
+        const result = await deleteJson(CONFIG.DELETE_TEAM_MEMBER_URL, { name, teamName: activeTeamName });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          alert(d.message || "Failed to remove member.");
+          btn.disabled = false;
+          btn.textContent = "Remove";
+          return;
+        }
+
+        openTeam(activeTeamName);
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        btn.disabled = false;
+        btn.textContent = "Remove";
+      }
+    }
+
+    // ---------- invite code ----------
+    async function createInviteCode() {
+      const btn = document.getElementById("inviteBtn");
+      const inviteMsg = document.getElementById("inviteMsg");
+      hideMsg(inviteMsg);
+
+      btn.disabled = true;
+      btn.textContent = "Generating…";
+
+      try {
+        const result = await postJson(CONFIG.CREATE_TEAM_INVITE_URL, { teamName: activeTeamName });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          showMsg(inviteMsg, d.message || "Failed to generate invite code.", "bad");
+        } else {
+          showMsg(inviteMsg, d.message, "good");
+        }
+      } catch (err) {
+        showMsg(inviteMsg, "Couldn't reach the server.", "bad");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Generate invite code";
+      }
+    }
+
+    // ---------- create ----------
+    createForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideMsg(createMsg);
+
+      const name = document.getElementById("teamName").value.trim();
+      const description = document.getElementById("teamDesc").value.trim();
+
+      if (!name) {
+        showMsg(createMsg, "Team name is required.", "bad");
+        return;
+      }
+
+      setBusy(createBtn, true, "Creating…", "Create team");
+
+      try {
+        const result = await postJson(CONFIG.MANAGE_TEAMS_URL, { name, description });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          showMsg(createMsg, d.message || d.error || "Failed to create team.", "bad");
+          return;
+        }
+
+        showMsg(createMsg, "Team created.", "good");
+        createForm.reset();
+        loadTeams();
+      } catch (err) {
+        showMsg(createMsg, "Couldn't reach the server.", "bad");
+      } finally {
+        setBusy(createBtn, false, "Creating…", "Create team");
+      }
+    });
+
+    // ---------- join ----------
+    joinForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideMsg(joinMsg);
+
+      const teamCode = document.getElementById("teamCode").value.trim();
+
+      if (!teamCode) {
+        showMsg(joinMsg, "Invite code is required.", "bad");
+        return;
+      }
+
+      setBusy(joinBtn, true, "Joining…", "Join team");
+
+      try {
+        const result = await postJson(CONFIG.USE_TEAM_INVITE_URL, { teamCode });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          showMsg(joinMsg, d.message || "Failed to join team.", "bad");
+          return;
+        }
+
+        showMsg(joinMsg, d.message || "Joined team.", "good");
+        joinForm.reset();
+        loadTeams();
+      } catch (err) {
+        showMsg(joinMsg, "Couldn't reach the server.", "bad");
+      } finally {
+        setBusy(joinBtn, false, "Joining…", "Join team");
+      }
+    });
+
+    // ---------- delete ----------
+    async function deleteTeam(name, btn) {
+      if (!confirm(`Delete team "${name}"? This can't be undone.`)) return;
+
+      btn.disabled = true;
+      btn.textContent = "…";
+
+      try {
+        // Assumed body shape: { name }, matching the POST create field.
+        // Adjust if manageTeams.php's DELETE expects a different key.
+        const result = await deleteJson(CONFIG.MANAGE_TEAMS_URL, { name });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          alert(d.message || d.error || "Failed to delete team.");
+          btn.disabled = false;
+          btn.textContent = "Delete";
+          return;
+        }
+
+        if (activeTeamName === name) {
+          activeTeamName = null;
+          teamDetail.innerHTML = `<p class="teams__detail-placeholder">Select a team on the left to see details.</p>`;
+        }
+        loadTeams();
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        btn.disabled = false;
+        btn.textContent = "Delete";
+      }
+    }
+  </script>
+</body>
+</html>

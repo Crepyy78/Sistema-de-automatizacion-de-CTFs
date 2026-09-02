@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Running challenges</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="dash">
+    <div class="dash__topbar">
+      <div class="rail__mark">the<span>vault</span></div>
+      <a href="dashboard.html" class="users__back">&larr; Back to dashboard</a>
+    </div>
+
+    <main class="stage" style="padding-top: 24px; align-items: flex-start;">
+      <div class="ticket ticket--wide">
+        <div class="ticket__perf"></div>
+
+        <p class="ticket__eyebrow">Containers</p>
+        <h1>Running challenges</h1>
+
+        <p class="event__section-sub" id="containersSub">Loading…</p>
+        <table class="ranking-table" id="containersTable" style="display:none;">
+          <thead>
+            <tr>
+              <th id="containersUserHeader" style="display:none;">User</th>
+              <th>Challenge</th>
+              <th>Event</th>
+              <th style="text-align: right;">Port</th>
+              <th style="text-align: right;">Status</th>
+              <th style="width: 80px;"></th>
+            </tr>
+          </thead>
+          <tbody id="containersRows"></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const containersSub = document.getElementById("containersSub");
+    const containersTable = document.getElementById("containersTable");
+    const containersUserHeader = document.getElementById("containersUserHeader");
+    const containersRows = document.getElementById("containersRows");
+    let isAdminUser = false;
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+
+    // ---------- session guard ----------
+    (async () => {
+      try {
+        const result = await getJson(CONFIG.CHECK_SESSION_URL);
+        const d = result.data || {};
+        if (!d.loggedIn) { window.location.href = "login.html"; return; }
+        isAdminUser = !!d.isAdmin;
+        loadContainers();
+      } catch (err) {
+        window.location.href = "login.html";
+      }
+    })();
+
+    // ---------- running containers ----------
+    async function loadContainers() {
+      try {
+        const url = isAdminUser
+          ? `${CONFIG.MANAGE_STATUS_CHALLENGE_URL}?${new URLSearchParams({ all: "1" })}`
+          : CONFIG.MANAGE_STATUS_CHALLENGE_URL;
+        const result = await getJson(url);
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          containersSub.textContent = d.message || "Couldn't load containers.";
+          containersSub.style.display = "block";
+          containersTable.style.display = "none";
+          return;
+        }
+
+        const rows = isAdminUser ? (d.containers || []) : (d.container ? [d.container] : []);
+        renderContainers(rows);
+      } catch (err) {
+        containersSub.textContent = "Couldn't reach the server.";
+        containersSub.style.display = "block";
+        containersTable.style.display = "none";
+      }
+    }
+
+    function renderContainers(rows) {
+      containersUserHeader.style.display = isAdminUser ? "table-cell" : "none";
+
+      if (rows.length === 0) {
+        containersSub.textContent = "No running challenges.";
+        containersSub.style.display = "block";
+        containersTable.style.display = "none";
+        return;
+      }
+
+      containersSub.style.display = "none";
+      containersTable.style.display = "table";
+      containersRows.innerHTML = rows
+        .map(
+          (row) => `
+        <tr>
+          ${isAdminUser ? `<td>${escapeHtml(row.username)}</td>` : ""}
+          <td>${escapeHtml(row.name)}</td>
+          <td>${escapeHtml(row.eventName)}</td>
+          <td style="text-align: right;">${escapeHtml(row.port)}</td>
+          <td style="text-align: right;">${escapeHtml(row.status)}</td>
+          <td style="text-align: right;"><button type="button" class="teams__mini-btn teams__mini-btn--danger" data-instance="${escapeHtml(row.instanceId)}">Delete</button></td>
+        </tr>`
+        )
+        .join("");
+
+      containersRows.querySelectorAll("button[data-instance]").forEach((btn) => {
+        btn.addEventListener("click", () => deleteContainer(btn.dataset.instance, btn));
+      });
+    }
+
+    async function deleteContainer(instanceId, btn) {
+      if (!confirm("Delete this running challenge? This can't be undone.")) return;
+
+      btn.disabled = true;
+      btn.textContent = "…";
+
+      try {
+        const result = await deleteJson(CONFIG.MANAGE_STATUS_CHALLENGE_URL, { instanceId });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          alert(d.message || "Failed to delete container.");
+          btn.disabled = false;
+          btn.textContent = "Delete";
+          return;
+        }
+
+        loadContainers();
+      } catch (err) {
+        alert("Couldn't reach the server.");
+        btn.disabled = false;
+        btn.textContent = "Delete";
+      }
+    }
+  </script>
+</body>
+</html>

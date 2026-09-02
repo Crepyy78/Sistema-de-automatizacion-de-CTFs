@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Edit profile</title>
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+
+  <div class="dash">
+    <div class="dash__topbar">
+      <div class="rail__mark">the<span>vault</span></div>
+      <a href="dashboard.html" class="users__back">&larr; Back to dashboard</a>
+    </div>
+
+    <main class="stage" style="padding-top: 24px;">
+      <div class="ticket">
+        <div class="ticket__perf"></div>
+
+        <!-- ---------- step 1: edit form ---------- -->
+        <div id="formStep">
+          <p class="ticket__eyebrow">Profile</p>
+          <h1>Edit profile</h1>
+
+          <div id="msg" class="msg"></div>
+
+          <form id="profileForm" novalidate>
+            <div class="field">
+              <label for="newUsername">New username</label>
+              <input type="text" id="newUsername" name="newUsername" autocomplete="username" placeholder="Leave blank to keep current" />
+            </div>
+
+            <div class="field">
+              <label for="password">New password</label>
+              <input type="password" id="password" name="password" autocomplete="new-password" placeholder="Leave blank to keep current" />
+            </div>
+
+            <div class="field" id="confirmField" style="display:none;">
+              <label for="confirm">Confirm new password</label>
+              <input type="password" id="confirm" name="confirm" autocomplete="new-password" />
+            </div>
+
+            <label class="check">
+              <input type="checkbox" id="totpRegen" />
+              <span>Generate a new authenticator (2FA) code</span>
+            </label>
+
+            <button type="submit" class="submit" id="submitBtn">Save changes</button>
+          </form>
+        </div>
+
+        <!-- ---------- step 2: TOTP re-enrollment ---------- -->
+        <div id="enrollStep" class="enroll">
+          <p class="ticket__eyebrow">Profile · 2FA</p>
+          <h1>Scan your new code</h1>
+
+          <p class="enroll__label">Your old authenticator entry will stop working once this is scanned.</p>
+          <div class="enroll__qr" id="qrHolder"></div>
+
+          <p class="enroll__label">Or enter this key manually</p>
+          <div class="enroll__secret">
+            <code id="secretText">—</code>
+            <button type="button" class="enroll__copy" id="copyBtn">Copy</button>
+          </div>
+
+          <button type="button" class="submit" id="continueBtn">Done</button>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const form = document.getElementById("profileForm");
+    const msg = document.getElementById("msg");
+    const submitBtn = document.getElementById("submitBtn");
+    const passwordInput = document.getElementById("password");
+    const confirmField = document.getElementById("confirmField");
+    const confirmInput = document.getElementById("confirm");
+    const totpRegen = document.getElementById("totpRegen");
+
+    const formStep = document.getElementById("formStep");
+    const enrollStep = document.getElementById("enrollStep");
+    const qrHolder = document.getElementById("qrHolder");
+    const secretText = document.getElementById("secretText");
+    const copyBtn = document.getElementById("copyBtn");
+    const continueBtn = document.getElementById("continueBtn");
+
+    passwordInput.addEventListener("input", () => {
+      confirmField.style.display = passwordInput.value ? "block" : "none";
+    });
+
+    // Session gate — this page has nothing role-specific, just needs
+    // to confirm the user is actually logged in.
+    (async () => {
+      try {
+        const result = await getJson(CONFIG.CHECK_SESSION_URL);
+        const d = result.data || {};
+        if (!d.loggedIn) window.location.href = "login.html";
+      } catch (err) {
+        window.location.href = "login.html";
+      }
+    })();
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideMsg(msg);
+
+      const newUsername = document.getElementById("newUsername").value.trim();
+      const password = passwordInput.value;
+      const confirm = confirmInput.value;
+      const wantsTotp = totpRegen.checked;
+
+      if (password && password !== confirm) {
+        showMsg(msg, "Passwords don't match.", "bad");
+        return;
+      }
+
+      const changes = [];
+      if (newUsername) changes.push({ newUsername });
+      if (password) changes.push({ password });
+      if (wantsTotp) changes.push({ totp: "y" });
+
+      if (changes.length === 0) {
+        showMsg(msg, "Nothing to save — fill in at least one field.", "bad");
+        return;
+      }
+
+      setBusy(submitBtn, true, "Saving…", "Save changes");
+
+      // One PUT per changed field, same pattern as the admin user
+      // editor — keeps each field's success/failure independent and
+      // avoids the API rejecting a combined payload it doesn't expect.
+      let otpauth = null;
+      let secret = null;
+      const failures = [];
+
+      for (const change of changes) {
+        try {
+          const result = await putJson(CONFIG.PROFILE_URL, change);
+          const parsed = parseApiResponse(result);
+
+          if (!parsed.success) {
+            failures.push(Object.keys(change)[0] + ": " + (parsed.message || "failed"));
+            continue;
+          }
+
+          if (change.totp && parsed.otpauth) {
+            otpauth = parsed.otpauth;
+            secret = parsed.secret;
+          }
+        } catch (err) {
+          failures.push(Object.keys(change)[0] + ": couldn't reach the server");
+        }
+      }
+
+      setBusy(submitBtn, false, "Saving…", "Save changes");
+
+      if (otpauth) {
+        showEnrollment(otpauth, secret);
+        return; // don't also show the inline message — the QR panel takes over
+      }
+
+      if (failures.length === 0) {
+        showMsg(msg, "Saved.", "good");
+        form.reset();
+        confirmField.style.display = "none";
+      } else {
+        showMsg(msg, failures.join(" · "), "bad");
+      }
+    });
+
+    function showEnrollment(otpauthUri, secret) {
+      formStep.style.display = "none";
+      enrollStep.classList.add("is-visible");
+
+      qrHolder.innerHTML = "";
+      if (window.QRCode) {
+        new QRCode(qrHolder, {
+          text: otpauthUri,
+          width: 260,
+          height: 260,
+          colorDark: "#10131a",
+          colorLight: "#eae6da",
+        });
+      } else {
+        const p = document.createElement("p");
+        p.style.fontFamily = "var(--mono)";
+        p.style.fontSize = "12px";
+        p.style.color = "#10131a";
+        p.style.wordBreak = "break-all";
+        p.textContent = otpauthUri;
+        qrHolder.appendChild(p);
+      }
+
+      secretText.textContent = secret || "(secret not found in response — check the otpauth:// URI above)";
+    }
+
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(secretText.textContent);
+        copyBtn.textContent = "Copied";
+        setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+      } catch (_) {
+        /* clipboard API unavailable — ignore silently */
+      }
+    });
+
+    continueBtn.addEventListener("click", () => {
+      window.location.href = "dashboard.html";
+    });
+  </script>
+</body>
+</html>

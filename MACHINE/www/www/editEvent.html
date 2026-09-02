@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Edit event</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="dash">
+    <div class="dash__topbar">
+      <div class="rail__mark">the<span>vault</span></div>
+      <a href="dashboard.html" class="users__back">&larr; Back to dashboard</a>
+    </div>
+
+    <main class="stage" style="padding-top: 24px;">
+      <div class="ticket">
+        <div class="ticket__perf"></div>
+
+        <p class="ticket__eyebrow">Events</p>
+        <h1 id="pageTitle">Edit event</h1>
+
+        <div id="msg" class="msg"></div>
+
+        <form id="eventForm" novalidate>
+          <div class="field">
+            <label for="eventName">Name</label>
+            <input type="text" id="eventName" required />
+            <div class="field__hint">Letters, numbers, spaces, "_" and "-" only.</div>
+          </div>
+
+          <div class="field">
+            <label for="eventDescription">Description</label>
+            <input type="text" id="eventDescription" placeholder="Leave blank to keep current" />
+            <div class="field__hint">Letters, numbers, spaces, "_" and "-" only.</div>
+          </div>
+
+          <div class="field">
+            <label for="startDate">Start date</label>
+            <input type="datetime-local" id="startDate" required />
+          </div>
+
+          <div class="field">
+            <label for="endDate">End date</label>
+            <input type="datetime-local" id="endDate" required />
+          </div>
+
+          <div class="field">
+            <label for="peoplePerTeam">People per team</label>
+            <input type="number" id="peoplePerTeam" min="1" step="1" placeholder="Leave blank to keep current" />
+          </div>
+
+          <label class="check">
+            <input type="checkbox" id="isPublic" />
+            <span>Public event</span>
+          </label>
+
+          <div class="field__hint" style="margin: -8px 0 18px;">
+            Name, start date, people-per-team and public status can only be changed before the event starts.
+          </div>
+
+          <button type="submit" class="submit" id="submitBtn">Save changes</button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const form = document.getElementById("eventForm");
+    const msg = document.getElementById("msg");
+    const submitBtn = document.getElementById("submitBtn");
+    const pageTitle = document.getElementById("pageTitle");
+
+    const params = new URLSearchParams(window.location.search);
+    const originalName = params.get("name") || "";
+
+    function toSqlDateTime(localValue) {
+      if (!localValue) return "";
+      const d = new Date(localValue); // datetime-local values are parsed as local time
+      if (isNaN(d)) return "";
+      return d.toISOString().slice(0, 19).replace("T", " "); // stored as UTC
+    }
+
+    function toLocalDateTime(sqlValue) {
+      if (!sqlValue) return "";
+      const d = new Date(sqlValue.replace(" ", "T") + "Z"); // stored value is UTC
+      if (isNaN(d)) return "";
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    // ---------- session gate ----------
+    (async () => {
+      try {
+        const result = await getJson(CONFIG.CHECK_SESSION_URL);
+        const d = result.data || {};
+        if (!d.loggedIn) { window.location.href = "login.html"; return; }
+      } catch (err) {
+        window.location.href = "login.html";
+        return;
+      }
+
+      if (!originalName) {
+        window.location.href = "dashboard.html";
+        return;
+      }
+
+      pageTitle.textContent = `Edit "${originalName}"`;
+      document.getElementById("eventName").value = originalName;
+      document.getElementById("startDate").value = toLocalDateTime(params.get("startDate"));
+      document.getElementById("endDate").value = toLocalDateTime(params.get("endDate"));
+      document.getElementById("isPublic").checked = params.get("isPublic") === "1";
+    })();
+
+    // ---------- submit ----------
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideMsg(msg);
+
+      const newName = document.getElementById("eventName").value.trim();
+      const description = document.getElementById("eventDescription").value.trim();
+      const startDate = toSqlDateTime(document.getElementById("startDate").value);
+      const endDate = toSqlDateTime(document.getElementById("endDate").value);
+      const peoplePerTeam = document.getElementById("peoplePerTeam").value.trim();
+      const isPublic = document.getElementById("isPublic").checked;
+
+      if (!newName || !startDate || !endDate) {
+        showMsg(msg, "Name, start date and end date are required.", "bad");
+        return;
+      }
+
+      const changes = { startDate, endDate, isPublic };
+      if (newName !== originalName) changes.name = newName;
+      if (description) changes.description = description;
+      if (peoplePerTeam) changes.maxNumbersPerTeam = Number(peoplePerTeam);
+
+      setBusy(submitBtn, true, "Saving…", "Save changes");
+
+      try {
+        const result = await putJson(CONFIG.ADMINISTRATE_CTF_URL, { name: originalName, changes });
+        const d = result.data || {};
+
+        if (d.code !== "ok") {
+          showMsg(msg, d.message || "Failed to update the event.", "bad");
+          return;
+        }
+
+        showMsg(msg, "Event updated.", "good");
+      } catch (err) {
+        showMsg(msg, "Couldn't reach the server.", "bad");
+      } finally {
+        setBusy(submitBtn, false, "Saving…", "Save changes");
+      }
+    });
+  </script>
+</body>
+</html>
