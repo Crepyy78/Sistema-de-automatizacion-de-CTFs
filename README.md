@@ -6,7 +6,7 @@ Tener docker y el plugin docker-compose instalado.
 
 ## Ejecutar el programa
 
-Para levntar el sistema entero con ejecutar start.sh vale. Se necesita los permisos de Docker, para levantar los contenedores.
+Para levnatar el sistema entero con ejecutar start.sh vale. Se necesita los permisos de Docker, para levantar los contenedores.
 
 ## Inicio
 
